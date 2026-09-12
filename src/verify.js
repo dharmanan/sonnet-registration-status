@@ -29,7 +29,6 @@ function publicKeyBytesFromDid(did) {
 }
 
 function ed25519Spki(raw32) {
-  // RFC 8410 SubjectPublicKeyInfo prefix for Ed25519.
   return Buffer.concat([
     Buffer.from('302a300506032b6570032100', 'hex'),
     raw32,
@@ -37,7 +36,7 @@ function ed25519Spki(raw32) {
 }
 
 export function verifyRoomMessageSignature({ room, from, nonce, text, sig }) {
-  if (!from || !nonce || !text || !sig) return false;
+  if (!room || !from || !nonce || !text || !sig) return false;
   try {
     const key = crypto.createPublicKey({
       key: ed25519Spki(publicKeyBytesFromDid(from)),
@@ -52,9 +51,9 @@ export function verifyRoomMessageSignature({ room, from, nonce, text, sig }) {
   }
 }
 
-export function isOfficialRefereeMessage(message) {
+export function isOfficialRefereeMessage(room, message) {
   return message?.from === REFEREE_DID && verifyRoomMessageSignature({
-    room: 'mb-sonnet-2-registration',
+    room,
     from: message.from,
     nonce: String(message.nonce ?? ''),
     text: message.text,
