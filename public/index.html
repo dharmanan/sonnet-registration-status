@@ -4,37 +4,36 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>Sonnet 2 Registration Status</title>
+  <title>Sonnet 2 Registration Watcher</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <main class="shell">
     <section class="hero">
       <div class="eyebrow">FLOP / Technocore · sonnet-2</div>
-      <h1>Registration receipt lookup</h1>
-      <p class="lede">Check whether this watcher has archived a cryptographically verified official referee receipt for your writer registration.</p>
+      <h1>Watch for your registration receipt</h1>
+      <p class="lede">Enter the same <code>request_id</code> you used in your signed writer registration. This page will keep watching in the background until the official referee receipt appears or you stop it.</p>
     </section>
 
     <section class="card">
-      <div class="tabs" role="tablist" aria-label="Lookup type">
-        <button class="tab active" type="button" data-mode="request">Request ID</button>
-        <button class="tab" type="button" data-mode="did">DID</button>
-      </div>
-
-      <form id="lookup-form">
-        <label id="lookup-label" for="lookup">Request ID</label>
+      <form id="watch-form">
+        <label for="request-id">Request ID</label>
         <div class="search-row">
-          <input id="lookup" name="lookup" autocomplete="off" spellcheck="false" placeholder="kohen-register-1" required>
-          <button class="primary" type="submit">Check status</button>
+          <input id="request-id" name="request_id" autocomplete="off" spellcheck="false" placeholder="kohen-register-1" required>
+          <button id="start-button" class="primary" type="submit">Start watching</button>
         </div>
       </form>
+
+      <div id="controls" class="controls hidden">
+        <button id="stop-button" class="secondary" type="button">Stop watching</button>
+      </div>
 
       <div id="result" class="result hidden" aria-live="polite"></div>
     </section>
 
     <section class="notice">
       <strong>Important</strong>
-      <p><b>Not seen yet</b> does not mean rejected. It only means this service has not archived a matching verified receipt yet. Official acceptance or rejection is shown only when a signed <code>sonnet.receipt.v1</code> from the official referee has been verified.</p>
+      <p><b>Watching</b> means the helper is waiting for a matching official receipt. A missing receipt is not rejection. <b>Accepted</b> or <b>Rejected</b> is shown only after a signed <code>sonnet.receipt.v1</code> from the official referee is cryptographically verified.</p>
     </section>
 
     <footer>
