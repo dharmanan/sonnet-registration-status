@@ -3,16 +3,28 @@ import { isOfficialRefereeMessage, REFEREE_DID } from './verify.js';
 import { findByRequestId, saveReceipt } from './store.js';
 
 const JSONbig = JSONbigFactory({ storeAsString: true });
-const ROOM = 'mb-sonnet-2-registration';
-const BASE = `https://technocore.chat/r/${ROOM}`;
-
+const BASE = 'https://technocore.chat/r';
 const activeWatches = new Map();
-let running = false;
-let loopPromise = null;
-let cursor = 0;
-let lastError = null;
-let lastPollAt = null;
-let startedAt = null;
+const roomState = new Map();
+
+function watchKey(room, requestId) {
+  return `${room}::${requestId}`;
+}
+
+function cleanRequestId(requestId) {
+  const value = String(requestId || '').trim();
+  if (!value || value.length > 200) throw new Error('invalid_request_id');
+  return value;
+}
+
+function cleanRoom(room) {
+  const value = String(room || '').trim();
+  const allowed = value === 'mb-sonnet-2-registration'
+    || value === 'mb-sonnet-2-discovery'
+    || /^d-sonnet-2-team-[a-z0-9][a-z0-9_-]{0,15}$/.test(value);
+  if (!allowed) throw new Error('invalid_or_unsupported_room');
+  return value;
+}
 
 function deepFind(obj, keys) {
   if (!obj || typeof obj !== 'object') return null;
@@ -28,7 +40,7 @@ function deepFind(obj, keys) {
   return null;
 }
 
-function normalizeReceipt(message) {
+function normalizeReceipt(room, message) {
   let payload;
   try {
     payload = JSON.parse(message.text);
@@ -48,14 +60,27 @@ function normalizeReceipt(message) {
   const role = deepFind(payload, ['role']) || null;
   const reason = deepFind(payload, ['reason', 'reason_code', 'error']) || null;
   const intakeSeq = deepFind(payload, ['intake_seq']) || null;
+  const action = deepFind(payload, ['action', 'request_type', 'kind']) || null;
+  const gameId = deepFind(payload, ['game_id']) || null;
+  const poemRoom = deepFind(payload, ['poem_room']) || null;
+  const roomGeneration = deepFind(payload, ['room_generation']) || null;
+  const version = deepFind(payload, ['version', 'next_version', 'accepted_version']) || null;
+  const stateHash = deepFind(payload, ['state_hash', 'next_state_hash', 'accepted_state_hash']) || null;
 
   return {
+    room,
     requestId: String(requestId),
     participantDid: participantDid ? String(participantDid) : null,
     role: role ? String(role) : null,
     status,
     reason: reason ? String(reason) : null,
     intakeSeq: intakeSeq == null ? null : String(intakeSeq),
+    action: action ? String(action) : null,
+    gameId: gameId ? String(gameId) : null,
+    poemRoom: poemRoom ? String(poemRoom) : null,
+    roomGeneration: roomGeneration == null ? null : String(roomGeneration),
+    version: version == null ? null : String(version),
+    stateHash: stateHash ? String(stateHash) : null,
     roomSeq: Number(message.seq),
     roomTimestamp: message.ts || null,
     refereeDid: REFEREE_DID,
@@ -64,27 +89,50 @@ function normalizeReceipt(message) {
   };
 }
 
-async function processMessage(message) {
+async function processMessage(room, message) {
   if (!message || message.from !== REFEREE_DID) return false;
 
-  const candidate = normalizeReceipt(message);
-  if (!candidate || !activeWatches.has(candidate.requestId)) return false;
+  const candidate = normalizeReceipt(room, message);
+  if (!candidate) return false;
 
-  if (!isOfficialRefereeMessage(message)) return false;
+  const key = watchKey(room, candidate.requestId);
+  if (!activeWatches.has(key)) return false;
+  if (!isOfficialRefereeMessage(room, message)) return false;
 
   await saveReceipt(candidate);
-  activeWatches.delete(candidate.requestId);
+  activeWatches.delete(key);
   return true;
 }
 
-async function processMessages(messages) {
+async function processMessages(room, messages) {
   const ordered = [...messages].sort((a, b) => Number(a.seq) - Number(b.seq));
-  for (const message of ordered) await processMessage(message);
+  for (const message of ordered) await processMessage(room, message);
 }
 
-async function readExport() {
-  const response = await fetch(`${BASE}/export`, {
-    headers: { 'user-agent': 'sonnet-registration-status/0.2' },
+function getRoomState(room) {
+  if (!roomState.has(room)) {
+    roomState.set(room, {
+      cursor: 0,
+      running: false,
+      loopPromise: null,
+      startedAt: null,
+      lastPollAt: null,
+      lastError: null,
+    });
+  }
+  return roomState.get(room);
+}
+
+function hasActiveWatchForRoom(room) {
+  for (const watch of activeWatches.values()) {
+    if (watch.room === room) return true;
+  }
+  return false;
+}
+
+async function readExport(room) {
+  const response = await fetch(`${BASE}/${room}/export`, {
+    headers: { 'user-agent': 'sonnet-receipt-watcher/0.3' },
   });
   if (!response.ok) throw new Error(`export HTTP ${response.status}`);
 
@@ -95,25 +143,27 @@ async function readExport() {
     try {
       messages.push(JSONbig.parse(line));
     } catch {
-      // Ignore a malformed retained line instead of stopping the watch.
+      // Ignore malformed retained lines rather than stopping the watch.
     }
   }
   return messages;
 }
 
-async function resyncFromExport() {
-  const messages = await readExport();
-  await processMessages(messages);
+async function resyncFromExport(room) {
+  const state = getRoomState(room);
+  const messages = await readExport(room);
+  await processMessages(room, messages);
   const maxSeq = messages.reduce((max, message) => Math.max(max, Number(message.seq) || 0), 0);
-  if (maxSeq > cursor) cursor = maxSeq;
+  if (maxSeq > state.cursor) state.cursor = maxSeq;
 }
 
-async function pollOnce() {
-  const since = cursor;
+async function pollOnce(room) {
+  const state = getRoomState(room);
+  const since = state.cursor;
   const cacheBuster = Date.now();
-  const url = `${BASE}?format=json&since=${since}&limit=200&wait=10&n=${cacheBuster}`;
+  const url = `${BASE}/${room}?format=json&since=${since}&limit=200&wait=10&n=${cacheBuster}`;
   const response = await fetch(url, {
-    headers: { 'user-agent': 'sonnet-registration-status/0.2' },
+    headers: { 'user-agent': 'sonnet-receipt-watcher/0.3' },
   });
   if (!response.ok) throw new Error(`room HTTP ${response.status}`);
 
@@ -123,99 +173,101 @@ async function pollOnce() {
   const firstSeq = view.first_seq == null ? null : Number(view.first_seq);
 
   if (firstSeq != null && firstSeq > since + 1) {
-    await resyncFromExport();
+    await resyncFromExport(room);
     return;
   }
 
-  await processMessages(messages);
+  await processMessages(room, messages);
   const lastSeq = Number(view.last_seq || since);
-  if (lastSeq > cursor) cursor = lastSeq;
+  if (lastSeq > state.cursor) state.cursor = lastSeq;
 }
 
-async function runLoop() {
-  running = true;
-  startedAt = new Date().toISOString();
+async function runLoop(room) {
+  const state = getRoomState(room);
+  state.running = true;
+  state.startedAt = new Date().toISOString();
 
   try {
-    while (activeWatches.size > 0) {
+    while (hasActiveWatchForRoom(room)) {
       try {
-        lastPollAt = new Date().toISOString();
-        await pollOnce();
-        lastError = null;
+        state.lastPollAt = new Date().toISOString();
+        await pollOnce(room);
+        state.lastError = null;
       } catch (error) {
-        lastError = String(error?.message || error);
+        state.lastError = String(error?.message || error);
         await new Promise((resolve) => setTimeout(resolve, 3000));
       }
     }
   } finally {
-    running = false;
-    loopPromise = null;
-    if (activeWatches.size > 0) queueMicrotask(ensureLoop);
+    state.running = false;
+    state.loopPromise = null;
+    if (hasActiveWatchForRoom(room)) queueMicrotask(() => ensureLoop(room));
   }
 }
 
-function ensureLoop() {
-  if (!loopPromise) {
-    loopPromise = runLoop().catch((error) => {
-      lastError = String(error?.message || error);
+function ensureLoop(room) {
+  const state = getRoomState(room);
+  if (!state.loopPromise) {
+    state.loopPromise = runLoop(room).catch((error) => {
+      state.lastError = String(error?.message || error);
     });
   }
 }
 
-function cleanRequestId(requestId) {
-  const value = String(requestId || '').trim();
-  if (!value || value.length > 200) throw new Error('invalid_request_id');
-  return value;
-}
+export async function startWatch(roomInput, requestIdInput) {
+  const room = cleanRoom(roomInput);
+  const requestId = cleanRequestId(requestIdInput);
+  const existing = findByRequestId(requestId, room);
+  if (existing) return watchStatus(room, requestId);
 
-export async function startWatch(requestId) {
-  const id = cleanRequestId(requestId);
-
-  if (findByRequestId(id)) return watchStatus(id);
-  if (!activeWatches.has(id)) {
-    activeWatches.set(id, {
-      requestId: id,
+  const key = watchKey(room, requestId);
+  if (!activeWatches.has(key)) {
+    activeWatches.set(key, {
+      room,
+      requestId,
       startedAt: new Date().toISOString(),
     });
   }
 
+  const state = getRoomState(room);
   try {
-    await resyncFromExport();
-    lastError = null;
+    await resyncFromExport(room);
+    state.lastError = null;
   } catch (error) {
-    lastError = String(error?.message || error);
+    state.lastError = String(error?.message || error);
   }
 
-  if (activeWatches.has(id)) ensureLoop();
-  return watchStatus(id);
+  if (activeWatches.has(key)) ensureLoop(room);
+  return watchStatus(room, requestId);
 }
 
-export function stopWatch(requestId) {
-  const id = cleanRequestId(requestId);
-  const wasWatching = activeWatches.delete(id);
+export function stopWatch(roomInput, requestIdInput) {
+  const room = cleanRoom(roomInput);
+  const requestId = cleanRequestId(requestIdInput);
+  const key = watchKey(room, requestId);
+  const wasWatching = activeWatches.delete(key);
+  const receipt = findByRequestId(requestId, room);
   return {
-    requestId: id,
-    state: wasWatching ? 'stopped' : findByRequestId(id) ? 'found' : 'idle',
-    receipt: findByRequestId(id),
+    room,
+    requestId,
+    state: wasWatching ? 'stopped' : receipt ? 'found' : 'idle',
+    receipt,
   };
 }
 
-export function watchStatus(requestId) {
-  const id = cleanRequestId(requestId);
-  const receipt = findByRequestId(id);
+export function watchStatus(roomInput, requestIdInput) {
+  const room = cleanRoom(roomInput);
+  const requestId = cleanRequestId(requestIdInput);
+  const receipt = findByRequestId(requestId, room);
   if (receipt) {
-    return {
-      requestId: id,
-      state: 'found',
-      watching: false,
-      receipt,
-    };
+    return { room, requestId, state: 'found', watching: false, receipt };
   }
 
-  const watch = activeWatches.get(id);
+  const watch = activeWatches.get(watchKey(room, requestId));
   if (watch) {
     return {
-      requestId: id,
+      room,
+      requestId,
       state: 'watching',
       watching: true,
       startedAt: watch.startedAt,
@@ -223,21 +275,19 @@ export function watchStatus(requestId) {
     };
   }
 
-  return {
-    requestId: id,
-    state: 'idle',
-    watching: false,
-    receipt: null,
-  };
+  return { room, requestId, state: 'idle', watching: false, receipt: null };
 }
 
 export function watcherStatus() {
   return {
-    running,
     activeWatchCount: activeWatches.size,
-    startedAt,
-    lastPollAt,
-    lastError,
-    room: ROOM,
+    rooms: [...roomState.entries()].map(([room, state]) => ({
+      room,
+      running: state.running,
+      cursor: state.cursor,
+      startedAt: state.startedAt,
+      lastPollAt: state.lastPollAt,
+      lastError: state.lastError,
+    })),
   };
 }
