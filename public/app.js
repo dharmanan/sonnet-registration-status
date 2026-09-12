@@ -1,28 +1,12 @@
-const form = document.querySelector('#lookup-form');
-const input = document.querySelector('#lookup');
-const label = document.querySelector('#lookup-label');
+const form = document.querySelector('#watch-form');
+const input = document.querySelector('#request-id');
 const result = document.querySelector('#result');
-const tabs = [...document.querySelectorAll('.tab')];
+const controls = document.querySelector('#controls');
+const stopButton = document.querySelector('#stop-button');
+const startButton = document.querySelector('#start-button');
 
-let mode = 'request';
-
-function setMode(next) {
-  mode = next;
-  for (const tab of tabs) tab.classList.toggle('active', tab.dataset.mode === mode);
-  if (mode === 'request') {
-    label.textContent = 'Request ID';
-    input.placeholder = 'kohen-register-1';
-  } else {
-    label.textContent = 'DID';
-    input.placeholder = 'did:key:z6Mk...';
-  }
-  input.value = '';
-  result.className = 'result hidden';
-  result.innerHTML = '';
-  input.focus();
-}
-
-for (const tab of tabs) tab.addEventListener('click', () => setMode(tab.dataset.mode));
+let currentRequestId = null;
+let pollTimer = null;
 
 function esc(value) {
   return String(value ?? '')
@@ -38,10 +22,44 @@ function shortDid(did) {
   return `${did.slice(0, 12)}…${did.slice(-6)}`;
 }
 
-function statusBlock(receipt) {
+function stopPolling() {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = null;
+}
+
+function schedulePoll() {
+  stopPolling();
+  pollTimer = setTimeout(checkWatch, 2000);
+}
+
+function renderWatching(status) {
+  result.className = 'result neutral';
+  result.innerHTML = `
+    <div class="status-line">
+      <span class="dot pulse"></span>
+      <strong>WATCHING</strong>
+    </div>
+    <p>Waiting for the official referee receipt for <code>${esc(status.requestId)}</code>.</p>
+    <p class="muted">This keeps running in the background while this server is running. No timeout is imposed.</p>`;
+  controls.classList.remove('hidden');
+}
+
+function renderStopped() {
+  result.className = 'result neutral';
+  result.innerHTML = `
+    <div class="status-line">
+      <span class="dot"></span>
+      <strong>STOPPED</strong>
+    </div>
+    <p>The watcher was stopped manually.</p>`;
+  controls.classList.add('hidden');
+}
+
+function renderReceipt(receipt) {
   const status = receipt.status || 'unknown';
   const tone = status === 'accepted' ? 'ok' : status === 'rejected' ? 'bad' : 'neutral';
-  return `
+  result.className = `result ${tone}`;
+  result.innerHTML = `
     <div class="receipt ${tone}">
       <div class="status-line">
         <span class="dot"></span>
@@ -58,46 +76,90 @@ function statusBlock(receipt) {
         ${receipt.reason ? `<div><dt>Reason</dt><dd>${esc(receipt.reason)}</dd></div>` : ''}
       </dl>
     </div>`;
+  controls.classList.add('hidden');
 }
 
-function renderNotSeen() {
-  result.className = 'result neutral';
-  result.innerHTML = `
-    <div class="status-line">
-      <span class="dot"></span>
-      <strong>NOT SEEN YET</strong>
-    </div>
-    <p>No matching verified official receipt has been archived by this service yet.</p>
-    <p class="muted">This does not mean rejected. A missing receipt may simply be delayed or may have been outside this watcher's retained history.</p>`;
+async function checkWatch() {
+  if (!currentRequestId) return;
+
+  try {
+    const response = await fetch(`/api/watch?request_id=${encodeURIComponent(currentRequestId)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+
+    if (data.state === 'found' && data.receipt) {
+      stopPolling();
+      renderReceipt(data.receipt);
+      return;
+    }
+
+    if (data.state === 'watching') {
+      renderWatching(data);
+      schedulePoll();
+      return;
+    }
+
+    stopPolling();
+    renderStopped();
+  } catch (error) {
+    result.className = 'result bad';
+    result.innerHTML = `<strong>Watch check failed</strong><p>${esc(error.message)}</p>`;
+    schedulePoll();
+  }
 }
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const value = input.value.trim();
-  if (!value) return;
+  const requestId = input.value.trim();
+  if (!requestId) return;
 
+  stopPolling();
+  currentRequestId = requestId;
+  startButton.disabled = true;
   result.className = 'result loading';
-  result.textContent = 'Checking…';
-
-  const params = new URLSearchParams();
-  if (mode === 'request') params.set('request_id', value);
-  else params.set('did', value);
+  result.textContent = 'Starting watch…';
 
   try {
-    const response = await fetch(`/api/status?${params}`);
+    const response = await fetch(`/api/watch/start?request_id=${encodeURIComponent(requestId)}`, {
+      method: 'POST',
+    });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
 
-    if (!data.officialReceiptFound) return renderNotSeen();
-
-    result.className = 'result';
-    if (data.receipt) {
-      result.innerHTML = statusBlock(data.receipt);
-    } else {
-      result.innerHTML = data.receipts.map(statusBlock).join('');
+    if (data.state === 'found' && data.receipt) {
+      renderReceipt(data.receipt);
+      return;
     }
+
+    renderWatching(data);
+    schedulePoll();
   } catch (error) {
     result.className = 'result bad';
-    result.innerHTML = `<strong>Lookup failed</strong><p>${esc(error.message)}</p>`;
+    result.innerHTML = `<strong>Could not start watcher</strong><p>${esc(error.message)}</p>`;
+    controls.classList.add('hidden');
+  } finally {
+    startButton.disabled = false;
+  }
+});
+
+stopButton.addEventListener('click', async () => {
+  if (!currentRequestId) return;
+  stopPolling();
+  stopButton.disabled = true;
+
+  try {
+    const response = await fetch(`/api/watch/stop?request_id=${encodeURIComponent(currentRequestId)}`, {
+      method: 'POST',
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+
+    if (data.state === 'found' && data.receipt) renderReceipt(data.receipt);
+    else renderStopped();
+  } catch (error) {
+    result.className = 'result bad';
+    result.innerHTML = `<strong>Could not stop watcher</strong><p>${esc(error.message)}</p>`;
+  } finally {
+    stopButton.disabled = false;
   }
 });
