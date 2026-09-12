@@ -3,12 +3,16 @@ import path from 'node:path';
 
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'data');
 const DATA_FILE = path.join(DATA_DIR, 'receipts.json');
+const REGISTRATION_ROOM = 'mb-sonnet-2-registration';
 
 let state = {
   updatedAt: null,
-  lastRoomSeq: 0,
   receipts: {},
 };
+
+function receiptKey(room, requestId) {
+  return `${String(room || '').trim()}::${String(requestId || '').trim()}`;
+}
 
 export async function loadStore() {
   await fs.mkdir(DATA_DIR, { recursive: true });
@@ -19,6 +23,17 @@ export async function loadStore() {
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
+
+  // Migrate the original registration-only format without losing receipts.
+  const migrated = {};
+  for (const [oldKey, receipt] of Object.entries(state.receipts || {})) {
+    if (!receipt || typeof receipt !== 'object') continue;
+    const room = receipt.room || REGISTRATION_ROOM;
+    const requestId = receipt.requestId || oldKey;
+    migrated[receiptKey(room, requestId)] = { ...receipt, room, requestId };
+  }
+  state.receipts = migrated;
+
   return state;
 }
 
@@ -29,23 +44,12 @@ async function persist() {
   await fs.rename(tmp, DATA_FILE);
 }
 
-export function getLastRoomSeq() {
-  return Number(state.lastRoomSeq || 0);
-}
-
-export async function setLastRoomSeq(seq) {
-  if (Number.isInteger(seq) && seq > getLastRoomSeq()) {
-    state.lastRoomSeq = seq;
-    state.updatedAt = new Date().toISOString();
-    await persist();
-  }
-}
-
 export async function saveReceipt(record) {
-  if (!record?.requestId) return false;
+  if (!record?.room || !record?.requestId) return false;
 
-  const previous = state.receipts[record.requestId];
-  state.receipts[record.requestId] = {
+  const key = receiptKey(record.room, record.requestId);
+  const previous = state.receipts[key];
+  state.receipts[key] = {
     ...(previous || {}),
     ...record,
     firstSeenAt: previous?.firstSeenAt || new Date().toISOString(),
@@ -56,8 +60,8 @@ export async function saveReceipt(record) {
   return true;
 }
 
-export function findByRequestId(requestId) {
-  return state.receipts[String(requestId || '').trim()] || null;
+export function findByRequestId(requestId, room = REGISTRATION_ROOM) {
+  return state.receipts[receiptKey(room, requestId)] || null;
 }
 
 export function findByDid(did) {
@@ -74,7 +78,7 @@ export function publicStats() {
     receiptsStored: receipts.length,
     accepted: receipts.filter((r) => r.status === 'accepted').length,
     rejected: receipts.filter((r) => r.status === 'rejected').length,
-    lastRoomSeq: getLastRoomSeq(),
+    rooms: [...new Set(receipts.map((r) => r.room).filter(Boolean))],
     updatedAt: state.updatedAt,
   };
 }
