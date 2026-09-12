@@ -1,4 +1,7 @@
 const form = document.querySelector('#watch-form');
+const roomSelect = document.querySelector('#room');
+const teamRoomWrap = document.querySelector('#team-room-wrap');
+const teamRoomInput = document.querySelector('#team-room');
 const input = document.querySelector('#request-id');
 const result = document.querySelector('#result');
 const controls = document.querySelector('#controls');
@@ -6,6 +9,7 @@ const stopButton = document.querySelector('#stop-button');
 const startButton = document.querySelector('#start-button');
 
 let currentRequestId = null;
+let currentRoom = null;
 let pollTimer = null;
 
 function esc(value) {
@@ -21,6 +25,16 @@ function shortDid(did) {
   if (!did || did.length < 16) return did || '—';
   return `${did.slice(0, 12)}…${did.slice(-6)}`;
 }
+
+function selectedRoom() {
+  if (roomSelect.value !== 'team') return roomSelect.value;
+  return teamRoomInput.value.trim();
+}
+
+roomSelect.addEventListener('change', () => {
+  teamRoomWrap.classList.toggle('hidden', roomSelect.value !== 'team');
+  if (roomSelect.value === 'team') teamRoomInput.focus();
+});
 
 function stopPolling() {
   if (pollTimer) clearTimeout(pollTimer);
@@ -39,8 +53,9 @@ function renderWatching(status) {
       <span class="dot pulse"></span>
       <strong>WATCHING</strong>
     </div>
+    <p>Room: <code>${esc(status.room)}</code></p>
     <p>Waiting for the official referee receipt for <code>${esc(status.requestId)}</code>.</p>
-    <p class="muted">This keeps running in the background while this server is running. No timeout is imposed.</p>`;
+    <p class="muted">No fixed timeout. The watcher stops automatically when a matching verified receipt is found.</p>`;
   controls.classList.remove('hidden');
 }
 
@@ -67,9 +82,16 @@ function renderReceipt(receipt) {
         <span class="verified">Verified referee receipt</span>
       </div>
       <dl>
+        <div><dt>Room</dt><dd>${esc(receipt.room || '—')}</dd></div>
         <div><dt>Request ID</dt><dd>${esc(receipt.requestId)}</dd></div>
         <div><dt>DID</dt><dd title="${esc(receipt.participantDid)}">${esc(shortDid(receipt.participantDid))}</dd></div>
-        <div><dt>Role</dt><dd>${esc(receipt.role || '—')}</dd></div>
+        ${receipt.role ? `<div><dt>Role</dt><dd>${esc(receipt.role)}</dd></div>` : ''}
+        ${receipt.action ? `<div><dt>Action</dt><dd>${esc(receipt.action)}</dd></div>` : ''}
+        ${receipt.gameId ? `<div><dt>Game ID</dt><dd>${esc(receipt.gameId)}</dd></div>` : ''}
+        ${receipt.poemRoom ? `<div><dt>Poem room</dt><dd>${esc(receipt.poemRoom)}</dd></div>` : ''}
+        ${receipt.roomGeneration ? `<div><dt>Room generation</dt><dd>${esc(receipt.roomGeneration)}</dd></div>` : ''}
+        ${receipt.version ? `<div><dt>Version</dt><dd>${esc(receipt.version)}</dd></div>` : ''}
+        ${receipt.stateHash ? `<div><dt>State hash</dt><dd>${esc(receipt.stateHash)}</dd></div>` : ''}
         <div><dt>Referee signature</dt><dd>${receipt.signatureVerified ? 'Verified' : 'Not verified'}</dd></div>
         <div><dt>Room seq</dt><dd>${esc(receipt.roomSeq ?? '—')}</dd></div>
         <div><dt>Intake seq</dt><dd>${esc(receipt.intakeSeq ?? '—')}</dd></div>
@@ -79,11 +101,15 @@ function renderReceipt(receipt) {
   controls.classList.add('hidden');
 }
 
+function watchParams() {
+  return `room=${encodeURIComponent(currentRoom)}&request_id=${encodeURIComponent(currentRequestId)}`;
+}
+
 async function checkWatch() {
-  if (!currentRequestId) return;
+  if (!currentRequestId || !currentRoom) return;
 
   try {
-    const response = await fetch(`/api/watch?request_id=${encodeURIComponent(currentRequestId)}`);
+    const response = await fetch(`/api/watch?${watchParams()}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
 
@@ -111,18 +137,18 @@ async function checkWatch() {
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const requestId = input.value.trim();
-  if (!requestId) return;
+  const room = selectedRoom();
+  if (!requestId || !room) return;
 
   stopPolling();
   currentRequestId = requestId;
+  currentRoom = room;
   startButton.disabled = true;
   result.className = 'result loading';
   result.textContent = 'Starting watch…';
 
   try {
-    const response = await fetch(`/api/watch/start?request_id=${encodeURIComponent(requestId)}`, {
-      method: 'POST',
-    });
+    const response = await fetch(`/api/watch/start?${watchParams()}`, { method: 'POST' });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
 
@@ -143,14 +169,12 @@ form.addEventListener('submit', async (event) => {
 });
 
 stopButton.addEventListener('click', async () => {
-  if (!currentRequestId) return;
+  if (!currentRequestId || !currentRoom) return;
   stopPolling();
   stopButton.disabled = true;
 
   try {
-    const response = await fetch(`/api/watch/stop?request_id=${encodeURIComponent(currentRequestId)}`, {
-      method: 'POST',
-    });
+    const response = await fetch(`/api/watch/stop?${watchParams()}`, { method: 'POST' });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
 
