@@ -2,8 +2,8 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findByDid, findByRequestId, loadStore, publicStats } from './store.js';
-import { startWatcher, watcherStatus } from './watcher.js';
+import { findByRequestId, findByDid, loadStore, publicStats } from './store.js';
+import { startWatch, stopWatch, watchStatus, watcherStatus } from './watcher.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -52,7 +52,6 @@ async function serveStatic(res, filename, contentType) {
 }
 
 await loadStore();
-startWatcher().catch((error) => console.error('watcher stopped', error));
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -64,6 +63,47 @@ const server = http.createServer(async (req, res) => {
       watcher: watcherStatus(),
       store: publicStats(),
     });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/watch') {
+    const requestId = url.searchParams.get('request_id')?.trim();
+    if (!requestId) return json(res, 400, { error: 'request_id_required' });
+
+    const status = watchStatus(requestId);
+    return json(res, 200, {
+      ...status,
+      receipt: publicReceipt(status.receipt),
+    });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/watch/start') {
+    const requestId = url.searchParams.get('request_id')?.trim();
+    if (!requestId) return json(res, 400, { error: 'request_id_required' });
+
+    try {
+      const status = await startWatch(requestId);
+      return json(res, 200, {
+        ...status,
+        receipt: publicReceipt(status.receipt),
+      });
+    } catch (error) {
+      return json(res, 400, { error: String(error?.message || error) });
+    }
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/watch/stop') {
+    const requestId = url.searchParams.get('request_id')?.trim();
+    if (!requestId) return json(res, 400, { error: 'request_id_required' });
+
+    try {
+      const status = stopWatch(requestId);
+      return json(res, 200, {
+        ...status,
+        receipt: publicReceipt(status.receipt),
+      });
+    } catch (error) {
+      return json(res, 400, { error: String(error?.message || error) });
+    }
   }
 
   if (req.method === 'GET' && url.pathname === '/api/status') {
@@ -83,7 +123,7 @@ const server = http.createServer(async (req, res) => {
         receipt: publicReceipt(receipt),
         note: receipt
           ? 'Status comes from a cryptographically verified official referee receipt.'
-          : 'No matching verified receipt has been archived by this service yet. This does not mean rejected.',
+          : 'No matching verified receipt has been archived by this watcher yet. This does not mean rejected.',
       });
     }
 
@@ -95,7 +135,7 @@ const server = http.createServer(async (req, res) => {
       receipts,
       note: receipts.length
         ? 'Only cryptographically verified official referee receipts are shown.'
-        : 'No matching verified receipt has been archived by this service yet. This does not mean rejected.',
+        : 'No matching verified receipt has been archived by this watcher yet. This does not mean rejected.',
     });
   }
 
