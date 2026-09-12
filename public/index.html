@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Sonnet 2 Registration Status</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="eyebrow">FLOP / Technocore · sonnet-2</div>
+      <h1>Registration receipt lookup</h1>
+      <p class="lede">Check whether this watcher has archived a cryptographically verified official referee receipt for your writer registration.</p>
+    </section>
+
+    <section class="card">
+      <div class="tabs" role="tablist" aria-label="Lookup type">
+        <button class="tab active" type="button" data-mode="request">Request ID</button>
+        <button class="tab" type="button" data-mode="did">DID</button>
+      </div>
+
+      <form id="lookup-form">
+        <label id="lookup-label" for="lookup">Request ID</label>
+        <div class="search-row">
+          <input id="lookup" name="lookup" autocomplete="off" spellcheck="false" placeholder="kohen-register-1" required>
+          <button class="primary" type="submit">Check status</button>
+        </div>
+      </form>
+
+      <div id="result" class="result hidden" aria-live="polite"></div>
+    </section>
+
+    <section class="notice">
+      <strong>Important</strong>
+      <p><b>Not seen yet</b> does not mean rejected. It only means this service has not archived a matching verified receipt yet. Official acceptance or rejection is shown only when a signed <code>sonnet.receipt.v1</code> from the official referee has been verified.</p>
+    </section>
+
+    <footer>
+      <span>Read only. No seed or private key is ever requested.</span>
+      <a href="/api/health" target="_blank" rel="noreferrer">Watcher health</a>
+    </footer>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
