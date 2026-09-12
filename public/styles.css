@@ -1,0 +1,193 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #101114;
+  background: #f2f2ef;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(255,255,255,.95), transparent 34rem),
+    #f2f2ef;
+}
+
+button, input { font: inherit; }
+
+.shell {
+  width: min(920px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 72px 0 40px;
+}
+
+.hero { margin-bottom: 28px; }
+.eyebrow {
+  font-size: 12px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: #6f706b;
+  margin-bottom: 14px;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(36px, 7vw, 72px);
+  line-height: .98;
+  letter-spacing: -.045em;
+  max-width: 760px;
+}
+
+.lede {
+  max-width: 680px;
+  margin: 22px 0 0;
+  color: #555651;
+  font-size: 18px;
+  line-height: 1.55;
+}
+
+.card {
+  background: rgba(255,255,255,.86);
+  border: 1px solid #d8d8d2;
+  border-radius: 22px;
+  padding: 24px;
+  box-shadow: 0 18px 50px rgba(20,20,16,.06);
+}
+
+.tabs {
+  display: inline-flex;
+  gap: 4px;
+  background: #ecece7;
+  padding: 4px;
+  border-radius: 12px;
+  margin-bottom: 24px;
+}
+
+.tab {
+  border: 0;
+  background: transparent;
+  color: #6b6c67;
+  padding: 9px 12px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.tab.active {
+  background: #fff;
+  color: #111;
+  box-shadow: 0 1px 3px rgba(0,0,0,.08);
+}
+
+label {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+  margin-bottom: 8px;
+}
+
+.search-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+}
+
+input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #c9cac4;
+  background: #fff;
+  color: #111;
+  padding: 14px 15px;
+  border-radius: 12px;
+  outline: none;
+}
+
+input:focus { border-color: #686962; box-shadow: 0 0 0 3px rgba(70,70,60,.08); }
+
+.primary {
+  border: 0;
+  border-radius: 12px;
+  background: #111;
+  color: #fff;
+  padding: 0 18px;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.result {
+  margin-top: 18px;
+  border: 1px solid #d8d8d2;
+  border-radius: 16px;
+  padding: 18px;
+  background: #fafaf8;
+}
+
+.result.hidden { display: none; }
+.result.loading { color: #666; }
+.status-line { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.status-line strong { letter-spacing: .02em; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: #85867f; }
+.receipt.ok .dot { background: #198754; }
+.receipt.bad .dot, .result.bad .dot { background: #b42318; }
+.verified {
+  margin-left: auto;
+  font-size: 12px;
+  color: #5e6059;
+  border: 1px solid #d2d3cd;
+  border-radius: 999px;
+  padding: 5px 8px;
+}
+
+dl { margin: 18px 0 0; display: grid; gap: 10px; }
+dl > div { display: grid; grid-template-columns: 145px 1fr; gap: 12px; }
+dt { color: #777872; font-size: 13px; }
+dd { margin: 0; overflow-wrap: anywhere; }
+.muted { color: #70716c; }
+
+.notice {
+  margin-top: 16px;
+  padding: 18px 2px;
+  color: #4f504b;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.notice p { margin: 7px 0 0; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .95em; }
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid #d7d7d1;
+  padding-top: 20px;
+  margin-top: 18px;
+  color: #777872;
+  font-size: 13px;
+}
+footer a { color: inherit; }
+
+@media (max-width: 650px) {
+  .shell { padding-top: 42px; }
+  .search-row { grid-template-columns: 1fr; }
+  .primary { padding: 14px 16px; }
+  dl > div { grid-template-columns: 1fr; gap: 3px; }
+  .verified { margin-left: 0; width: 100%; border: 0; padding: 3px 0 0 18px; }
+  footer { flex-direction: column; }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root { color: #f2f2ee; background: #11120f; }
+  body { background: radial-gradient(circle at top left, #20211c, transparent 34rem), #11120f; }
+  .lede, .notice { color: #b8b9b2; }
+  .card { background: rgba(27,28,24,.9); border-color: #34352f; box-shadow: none; }
+  .tabs { background: #24251f; }
+  .tab { color: #a8aaa1; }
+  .tab.active { background: #34352f; color: #fff; }
+  input { background: #161713; color: #fff; border-color: #44453e; }
+  .primary { background: #f2f2ee; color: #111; }
+  .result { background: #171814; border-color: #34352f; }
+  .verified { border-color: #40413b; color: #adafa7; }
+  footer { border-color: #34352f; color: #8f9189; }
+}
