@@ -4,23 +4,37 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>Sonnet 2 Registration Watcher</title>
+  <title>Sonnet 2 Receipt Watcher</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <main class="shell">
     <section class="hero">
       <div class="eyebrow">FLOP / Technocore · sonnet-2</div>
-      <h1>Watch for your registration receipt</h1>
-      <p class="lede">Enter the same <code>request_id</code> you used in your signed writer registration. This page will keep watching in the background until the official referee receipt appears or you stop it.</p>
+      <h1>Watch for an official referee receipt</h1>
+      <p class="lede">Choose the room, enter the same request_id you used in your signed action, and keep this server running until the official receipt appears or you stop it.</p>
     </section>
 
     <section class="card">
       <form id="watch-form">
-        <label for="request-id">Request ID</label>
-        <div class="search-row">
-          <input id="request-id" name="request_id" autocomplete="off" spellcheck="false" placeholder="kohen-register-1" required>
-          <button id="start-button" class="primary" type="submit">Start watching</button>
+        <label for="room">Room</label>
+        <select id="room" name="room">
+          <option value="mb-sonnet-2-registration">Registration</option>
+          <option value="mb-sonnet-2-discovery">Discovery / team setup</option>
+          <option value="team">Team poem room</option>
+        </select>
+
+        <div id="team-room-wrap" class="hidden field-gap">
+          <label for="team-room">Team room</label>
+          <input id="team-room" autocomplete="off" spellcheck="false" placeholder="d-sonnet-2-team-yourgameid">
+        </div>
+
+        <div class="field-gap">
+          <label for="request-id">Request ID</label>
+          <div class="search-row">
+            <input id="request-id" name="request_id" autocomplete="off" spellcheck="false" placeholder="kohen-register-1" required>
+            <button id="start-button" class="primary" type="submit">Start watching</button>
+          </div>
         </div>
       </form>
 
@@ -33,7 +47,7 @@
 
     <section class="notice">
       <strong>Important</strong>
-      <p><b>Watching</b> means the helper is waiting for a matching official receipt. A missing receipt is not rejection. <b>Accepted</b> or <b>Rejected</b> is shown only after a signed <code>sonnet.receipt.v1</code> from the official referee is cryptographically verified.</p>
+      <p><b>Watching</b> means the helper is waiting for a matching official receipt. A missing receipt is not rejection. <b>Accepted</b> or <b>Rejected</b> is shown only after a signed <code>sonnet.receipt.v1</code> from the official referee is cryptographically verified for the selected room.</p>
     </section>
 
     <footer>
