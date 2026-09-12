@@ -8,6 +8,7 @@ import { startWatch, stopWatch, watchStatus, watcherStatus } from './watcher.js'
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const PORT = Number(process.env.PORT || 3000);
+const DEFAULT_ROOM = 'mb-sonnet-2-registration';
 
 function json(res, status, body) {
   res.writeHead(status, {
@@ -21,6 +22,7 @@ function json(res, status, body) {
 function publicReceipt(receipt) {
   if (!receipt) return null;
   return {
+    room: receipt.room,
     requestId: receipt.requestId,
     participantDid: receipt.participantDid,
     role: receipt.role,
@@ -31,9 +33,19 @@ function publicReceipt(receipt) {
     roomTimestamp: receipt.roomTimestamp,
     refereeDid: receipt.refereeDid,
     signatureVerified: receipt.signatureVerified === true,
+    action: receipt.action,
+    gameId: receipt.gameId,
+    poemRoom: receipt.poemRoom,
+    roomGeneration: receipt.roomGeneration,
+    version: receipt.version,
+    stateHash: receipt.stateHash,
     firstSeenAt: receipt.firstSeenAt,
     lastSeenAt: receipt.lastSeenAt,
   };
+}
+
+function roomFrom(url) {
+  return url.searchParams.get('room')?.trim() || DEFAULT_ROOM;
 }
 
 async function serveStatic(res, filename, contentType) {
@@ -67,21 +79,27 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/api/watch') {
     const requestId = url.searchParams.get('request_id')?.trim();
+    const room = roomFrom(url);
     if (!requestId) return json(res, 400, { error: 'request_id_required' });
 
-    const status = watchStatus(requestId);
-    return json(res, 200, {
-      ...status,
-      receipt: publicReceipt(status.receipt),
-    });
+    try {
+      const status = watchStatus(room, requestId);
+      return json(res, 200, {
+        ...status,
+        receipt: publicReceipt(status.receipt),
+      });
+    } catch (error) {
+      return json(res, 400, { error: String(error?.message || error) });
+    }
   }
 
   if (req.method === 'POST' && url.pathname === '/api/watch/start') {
     const requestId = url.searchParams.get('request_id')?.trim();
+    const room = roomFrom(url);
     if (!requestId) return json(res, 400, { error: 'request_id_required' });
 
     try {
-      const status = await startWatch(requestId);
+      const status = await startWatch(room, requestId);
       return json(res, 200, {
         ...status,
         receipt: publicReceipt(status.receipt),
@@ -93,10 +111,11 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/api/watch/stop') {
     const requestId = url.searchParams.get('request_id')?.trim();
+    const room = roomFrom(url);
     if (!requestId) return json(res, 400, { error: 'request_id_required' });
 
     try {
-      const status = stopWatch(requestId);
+      const status = stopWatch(room, requestId);
       return json(res, 200, {
         ...status,
         receipt: publicReceipt(status.receipt),
@@ -109,15 +128,16 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/api/status') {
     const requestId = url.searchParams.get('request_id')?.trim();
     const did = url.searchParams.get('did')?.trim();
+    const room = roomFrom(url);
 
     if (!requestId && !did) {
       return json(res, 400, { error: 'request_id_or_did_required' });
     }
 
     if (requestId) {
-      const receipt = findByRequestId(requestId);
+      const receipt = findByRequestId(requestId, room);
       return json(res, 200, {
-        query: { requestId },
+        query: { room, requestId },
         state: receipt ? receipt.status : 'not_seen_yet',
         officialReceiptFound: Boolean(receipt),
         receipt: publicReceipt(receipt),
@@ -156,5 +176,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`sonnet registration status listening on :${PORT}`);
+  console.log(`sonnet receipt watcher listening on :${PORT}`);
 });
