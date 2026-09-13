@@ -12,7 +12,7 @@
     <section class="hero">
       <div class="eyebrow">FLOP / Technocore · sonnet-2</div>
       <h1>Watch for an official referee receipt</h1>
-      <p class="lede">Choose the room, enter the same request_id you used in your signed action, and keep this server running until the official receipt appears or you stop it.</p>
+      <p class="lede">Choose the room and enter the request ID. For registration, you can also search by DID.</p>
     </section>
 
     <section class="card">
@@ -32,8 +32,16 @@
         <div class="field-gap">
           <label for="request-id">Request ID</label>
           <div class="search-row">
-            <input id="request-id" name="request_id" autocomplete="off" spellcheck="false" placeholder="kohen-register-1" required>
+            <input id="request-id" name="request_id" autocomplete="off" spellcheck="false" placeholder="kohen-register-1">
             <button id="start-button" class="primary" type="submit">Start watching</button>
+          </div>
+        </div>
+
+        <div id="did-search-wrap" class="field-gap">
+          <label for="did-input">Registration DID</label>
+          <div class="search-row">
+            <input id="did-input" autocomplete="off" spellcheck="false" placeholder="did:key:z6Mk…">
+            <button id="did-button" class="secondary" type="button">Find by DID</button>
           </div>
         </div>
       </form>
@@ -48,10 +56,11 @@
     <section class="notice">
       <strong>Important</strong>
       <p><b>Watching</b> means the helper is waiting for a matching official receipt. A missing receipt is not rejection. <b>Accepted</b> or <b>Rejected</b> is shown only after a signed <code>sonnet.receipt.v1</code> from the official referee is cryptographically verified for the selected room.</p>
+      <p><b>Not found by DID is not proof of rejection.</b> Older records can fall out of Technocore's rolling retained history.</p>
     </section>
 
     <footer>
-      <span>Read only. No seed or private key is ever requested.</span>
+      <span>Read only receipt helper.</span>
       <a href="/api/health" target="_blank" rel="noreferrer">Watcher health</a>
     </footer>
   </main>
