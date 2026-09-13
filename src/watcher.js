@@ -1,9 +1,11 @@
 import JSONbigFactory from 'json-bigint';
 import { isOfficialRefereeMessage, REFEREE_DID } from './verify.js';
-import { findByRequestId, saveReceipt } from './store.js';
+import { findByRequestId, findByDid, saveReceipt } from './store.js';
 
 const JSONbig = JSONbigFactory({ storeAsString: true });
 const BASE = 'https://technocore.chat/r';
+const REGISTRATION_ROOM = 'mb-sonnet-2-registration';
+const DID_RE = /^did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{44}$/;
 const activeWatches = new Map();
 const roomState = new Map();
 
@@ -17,9 +19,15 @@ function cleanRequestId(requestId) {
   return value;
 }
 
+function cleanDid(did) {
+  const value = String(did || '').trim();
+  if (!DID_RE.test(value)) throw new Error('invalid_ed25519_did');
+  return value;
+}
+
 function cleanRoom(room) {
   const value = String(room || '').trim();
-  const allowed = value === 'mb-sonnet-2-registration'
+  const allowed = value === REGISTRATION_ROOM
     || value === 'mb-sonnet-2-discovery'
     || /^d-sonnet-2-team-[a-z0-9][a-z0-9_-]{0,15}$/.test(value);
   if (!allowed) throw new Error('invalid_or_unsupported_room');
@@ -56,7 +64,7 @@ function normalizeReceipt(room, message) {
 
   const statusRaw = String(deepFind(payload, ['status']) || '').toLowerCase();
   const status = statusRaw === 'accepted' || statusRaw === 'rejected' ? statusRaw : 'unknown';
-  const participantDid = deepFind(payload, ['participant_did', 'did']) || null;
+  const participantDid = deepFind(payload, ['participant_did', 'sender_did', 'did']) || null;
   const role = deepFind(payload, ['role']) || null;
   const reason = deepFind(payload, ['reason', 'reason_code', 'error']) || null;
   const intakeSeq = deepFind(payload, ['intake_seq']) || null;
@@ -87,6 +95,34 @@ function normalizeReceipt(room, message) {
     signatureVerified: true,
     receipt: payload,
   };
+}
+
+function normalizeRegistration(message, did) {
+  if (!message || message.from !== did) return null;
+
+  let payload;
+  try {
+    payload = JSON.parse(message.text);
+  } catch {
+    return null;
+  }
+
+  if (payload?.type !== 'sonnet.register.v1' || payload?.contest_id !== 'sonnet-2') return null;
+  if (!payload.request_id) return null;
+
+  return {
+    did,
+    requestId: String(payload.request_id),
+    role: payload.role ? String(payload.role) : null,
+    xAccountUrl: payload.x_account_url ? String(payload.x_account_url) : null,
+    roomSeq: Number(message.seq),
+    roomTimestamp: message.ts || null,
+  };
+}
+
+function preferredDidReceipt(receipts) {
+  if (!receipts.length) return null;
+  return receipts.find((receipt) => receipt.status === 'accepted') || receipts[0];
 }
 
 async function processMessage(room, message) {
@@ -132,7 +168,7 @@ function hasActiveWatchForRoom(room) {
 
 async function readExport(room) {
   const response = await fetch(`${BASE}/${room}/export`, {
-    headers: { 'user-agent': 'sonnet-receipt-watcher/0.3' },
+    headers: { 'user-agent': 'sonnet-receipt-watcher/0.4' },
   });
   if (!response.ok) throw new Error(`export HTTP ${response.status}`);
 
@@ -163,7 +199,7 @@ async function pollOnce(room) {
   const cacheBuster = Date.now();
   const url = `${BASE}/${room}?format=json&since=${since}&limit=200&wait=10&n=${cacheBuster}`;
   const response = await fetch(url, {
-    headers: { 'user-agent': 'sonnet-receipt-watcher/0.3' },
+    headers: { 'user-agent': 'sonnet-receipt-watcher/0.4' },
   });
   if (!response.ok) throw new Error(`room HTTP ${response.status}`);
 
@@ -239,6 +275,102 @@ export async function startWatch(roomInput, requestIdInput) {
 
   if (activeWatches.has(key)) ensureLoop(room);
   return watchStatus(room, requestId);
+}
+
+export async function startRegistrationWatchByDid(didInput) {
+  const did = cleanDid(didInput);
+
+  const stored = preferredDidReceipt(findByDid(did));
+  if (stored) {
+    return {
+      room: REGISTRATION_ROOM,
+      did,
+      requestId: stored.requestId,
+      state: 'found',
+      watching: false,
+      registration: null,
+      receipt: stored,
+      resolvedFromDid: true,
+    };
+  }
+
+  const messages = await readExport(REGISTRATION_ROOM);
+  const ordered = [...messages].sort((a, b) => Number(a.seq) - Number(b.seq));
+  const registrations = ordered
+    .map((message) => normalizeRegistration(message, did))
+    .filter(Boolean);
+
+  // A retained receipt can still identify the DID even if its original registration
+  // message has already fallen out of the rolling room history.
+  for (const message of ordered) {
+    if (message?.from !== REFEREE_DID) continue;
+    const candidate = normalizeReceipt(REGISTRATION_ROOM, message);
+    if (!candidate || candidate.participantDid !== did) continue;
+    if (!isOfficialRefereeMessage(REGISTRATION_ROOM, message)) continue;
+    await saveReceipt(candidate);
+  }
+
+  const directReceipt = preferredDidReceipt(findByDid(did));
+  if (directReceipt) {
+    return {
+      room: REGISTRATION_ROOM,
+      did,
+      requestId: directReceipt.requestId,
+      state: 'found',
+      watching: false,
+      registration: registrations.at(-1) || null,
+      receipt: directReceipt,
+      resolvedFromDid: true,
+    };
+  }
+
+  if (!registrations.length) {
+    return {
+      room: REGISTRATION_ROOM,
+      did,
+      requestId: null,
+      state: 'not_found',
+      watching: false,
+      registration: null,
+      receipt: null,
+      resolvedFromDid: true,
+    };
+  }
+
+  const registration = registrations.at(-1);
+
+  // Some receipts do not repeat participant_did. Once the DID's registration
+  // request_id is known, match and verify the receipt by that request_id.
+  for (const message of ordered) {
+    if (message?.from !== REFEREE_DID) continue;
+    const candidate = normalizeReceipt(REGISTRATION_ROOM, message);
+    if (!candidate || candidate.requestId !== registration.requestId) continue;
+    if (!isOfficialRefereeMessage(REGISTRATION_ROOM, message)) continue;
+    if (!candidate.participantDid) candidate.participantDid = did;
+    await saveReceipt(candidate);
+  }
+
+  const existing = findByRequestId(registration.requestId, REGISTRATION_ROOM);
+  if (existing) {
+    return {
+      room: REGISTRATION_ROOM,
+      did,
+      requestId: registration.requestId,
+      state: 'found',
+      watching: false,
+      registration,
+      receipt: existing,
+      resolvedFromDid: true,
+    };
+  }
+
+  const status = await startWatch(REGISTRATION_ROOM, registration.requestId);
+  return {
+    ...status,
+    did,
+    registration,
+    resolvedFromDid: true,
+  };
 }
 
 export function stopWatch(roomInput, requestIdInput) {
