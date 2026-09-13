@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findByRequestId, findByDid, loadStore, publicStats } from './store.js';
-import { startWatch, stopWatch, watchStatus, watcherStatus } from './watcher.js';
+import { startRegistrationWatchByDid, startWatch, stopWatch, watchStatus, watcherStatus } from './watcher.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -69,25 +69,16 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
   if (req.method === 'GET' && url.pathname === '/api/health') {
-    return json(res, 200, {
-      ok: true,
-      contestId: 'sonnet-2',
-      watcher: watcherStatus(),
-      store: publicStats(),
-    });
+    return json(res, 200, { ok: true, contestId: 'sonnet-2', watcher: watcherStatus(), store: publicStats() });
   }
 
   if (req.method === 'GET' && url.pathname === '/api/watch') {
     const requestId = url.searchParams.get('request_id')?.trim();
     const room = roomFrom(url);
     if (!requestId) return json(res, 400, { error: 'request_id_required' });
-
     try {
       const status = watchStatus(room, requestId);
-      return json(res, 200, {
-        ...status,
-        receipt: publicReceipt(status.receipt),
-      });
+      return json(res, 200, { ...status, receipt: publicReceipt(status.receipt) });
     } catch (error) {
       return json(res, 400, { error: String(error?.message || error) });
     }
@@ -97,13 +88,20 @@ const server = http.createServer(async (req, res) => {
     const requestId = url.searchParams.get('request_id')?.trim();
     const room = roomFrom(url);
     if (!requestId) return json(res, 400, { error: 'request_id_required' });
-
     try {
       const status = await startWatch(room, requestId);
-      return json(res, 200, {
-        ...status,
-        receipt: publicReceipt(status.receipt),
-      });
+      return json(res, 200, { ...status, receipt: publicReceipt(status.receipt) });
+    } catch (error) {
+      return json(res, 400, { error: String(error?.message || error) });
+    }
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/watch/start-by-did') {
+    const did = url.searchParams.get('did')?.trim();
+    if (!did) return json(res, 400, { error: 'did_required' });
+    try {
+      const status = await startRegistrationWatchByDid(did);
+      return json(res, 200, { ...status, receipt: publicReceipt(status.receipt) });
     } catch (error) {
       return json(res, 400, { error: String(error?.message || error) });
     }
@@ -113,13 +111,9 @@ const server = http.createServer(async (req, res) => {
     const requestId = url.searchParams.get('request_id')?.trim();
     const room = roomFrom(url);
     if (!requestId) return json(res, 400, { error: 'request_id_required' });
-
     try {
       const status = stopWatch(room, requestId);
-      return json(res, 200, {
-        ...status,
-        receipt: publicReceipt(status.receipt),
-      });
+      return json(res, 200, { ...status, receipt: publicReceipt(status.receipt) });
     } catch (error) {
       return json(res, 400, { error: String(error?.message || error) });
     }
@@ -129,10 +123,7 @@ const server = http.createServer(async (req, res) => {
     const requestId = url.searchParams.get('request_id')?.trim();
     const did = url.searchParams.get('did')?.trim();
     const room = roomFrom(url);
-
-    if (!requestId && !did) {
-      return json(res, 400, { error: 'request_id_or_did_required' });
-    }
+    if (!requestId && !did) return json(res, 400, { error: 'request_id_or_did_required' });
 
     if (requestId) {
       const receipt = findByRequestId(requestId, room);
@@ -141,9 +132,7 @@ const server = http.createServer(async (req, res) => {
         state: receipt ? receipt.status : 'not_seen_yet',
         officialReceiptFound: Boolean(receipt),
         receipt: publicReceipt(receipt),
-        note: receipt
-          ? 'Status comes from a cryptographically verified official referee receipt.'
-          : 'No matching verified receipt has been archived by this watcher yet. This does not mean rejected.',
+        note: receipt ? 'Status comes from a cryptographically verified official referee receipt.' : 'No matching verified receipt has been archived by this watcher yet. This does not mean rejected.',
       });
     }
 
@@ -153,23 +142,13 @@ const server = http.createServer(async (req, res) => {
       state: receipts.length ? 'receipts_found' : 'not_seen_yet',
       officialReceiptFound: receipts.length > 0,
       receipts,
-      note: receipts.length
-        ? 'Only cryptographically verified official referee receipts are shown.'
-        : 'No matching verified receipt has been archived by this watcher yet. This does not mean rejected.',
+      note: receipts.length ? 'Only cryptographically verified official referee receipts are shown.' : 'No matching verified receipt has been archived by this watcher yet. This does not mean rejected.',
     });
   }
 
-  if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-    return serveStatic(res, 'index.html', 'text/html; charset=utf-8');
-  }
-
-  if (req.method === 'GET' && url.pathname === '/app.js') {
-    return serveStatic(res, 'app.js', 'text/javascript; charset=utf-8');
-  }
-
-  if (req.method === 'GET' && url.pathname === '/styles.css') {
-    return serveStatic(res, 'styles.css', 'text/css; charset=utf-8');
-  }
+  if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) return serveStatic(res, 'index.html', 'text/html; charset=utf-8');
+  if (req.method === 'GET' && url.pathname === '/app.js') return serveStatic(res, 'app.js', 'text/javascript; charset=utf-8');
+  if (req.method === 'GET' && url.pathname === '/styles.css') return serveStatic(res, 'styles.css', 'text/css; charset=utf-8');
 
   res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
   res.end('Not found');
