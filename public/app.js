@@ -7,6 +7,9 @@ const result = document.querySelector('#result');
 const controls = document.querySelector('#controls');
 const stopButton = document.querySelector('#stop-button');
 const startButton = document.querySelector('#start-button');
+const didInput = document.querySelector('#did-input');
+const didButton = document.querySelector('#did-button');
+const didSearchWrap = document.querySelector('#did-search-wrap');
 
 let currentRequestId = null;
 let currentRoom = null;
@@ -33,6 +36,7 @@ function selectedRoom() {
 
 roomSelect.addEventListener('change', () => {
   teamRoomWrap.classList.toggle('hidden', roomSelect.value !== 'team');
+  if (didSearchWrap) didSearchWrap.classList.toggle('hidden', roomSelect.value !== 'mb-sonnet-2-registration');
   if (roomSelect.value === 'team') teamRoomInput.focus();
 });
 
@@ -54,9 +58,24 @@ function renderWatching(status) {
       <strong>WATCHING</strong>
     </div>
     <p>Room: <code>${esc(status.room)}</code></p>
-    <p>Waiting for the official referee receipt for <code>${esc(status.requestId)}</code>.</p>
-    <p class="muted">No fixed timeout. The watcher stops automatically when a matching verified receipt is found.</p>`;
+    <p>Request ID: <code>${esc(status.requestId)}</code></p>
+    ${status.did ? `<p>DID: <code>${esc(shortDid(status.did))}</code></p>` : ''}
+    <p>Waiting for the official referee receipt.</p>
+    <p class="muted">No fixed timeout. A missing receipt is not rejection.</p>`;
   controls.classList.remove('hidden');
+}
+
+function renderNotFoundByDid(did) {
+  result.className = 'result neutral';
+  result.innerHTML = `
+    <div class="status-line">
+      <span class="dot"></span>
+      <strong>NOT FOUND IN RETAINED HISTORY</strong>
+    </div>
+    <p>DID: <code>${esc(shortDid(did))}</code></p>
+    <p>No retained registration or verified receipt for this DID was found.</p>
+    <p class="muted">This is not proof of rejection. Older room records can fall out of Technocore's rolling history.</p>`;
+  controls.classList.add('hidden');
 }
 
 function renderStopped() {
@@ -167,6 +186,53 @@ form.addEventListener('submit', async (event) => {
     startButton.disabled = false;
   }
 });
+
+if (didButton) {
+  didButton.addEventListener('click', async () => {
+    const did = didInput.value.trim();
+    if (!did) return;
+
+    stopPolling();
+    currentRequestId = null;
+    currentRoom = 'mb-sonnet-2-registration';
+    didButton.disabled = true;
+    result.className = 'result loading';
+    result.textContent = 'Searching retained registration history…';
+
+    try {
+      const response = await fetch(`/api/watch/start-by-did?did=${encodeURIComponent(did)}`, { method: 'POST' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+
+      if (data.state === 'not_found') {
+        renderNotFoundByDid(did);
+        return;
+      }
+
+      currentRequestId = data.requestId;
+      if (data.requestId) input.value = data.requestId;
+
+      if (data.state === 'found' && data.receipt) {
+        renderReceipt(data.receipt);
+        return;
+      }
+
+      if (data.state === 'watching') {
+        renderWatching({ ...data, did });
+        schedulePoll();
+        return;
+      }
+
+      renderNotFoundByDid(did);
+    } catch (error) {
+      result.className = 'result bad';
+      result.innerHTML = `<strong>DID lookup failed</strong><p>${esc(error.message)}</p>`;
+      controls.classList.add('hidden');
+    } finally {
+      didButton.disabled = false;
+    }
+  });
+}
 
 stopButton.addEventListener('click', async () => {
   if (!currentRequestId || !currentRoom) return;
